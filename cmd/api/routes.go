@@ -9,8 +9,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-type MiddlewareFunc func(http.Handler) http.Handler
-
 func (app *application) routes() http.Handler {
 
 	mux := mux.NewRouter()
