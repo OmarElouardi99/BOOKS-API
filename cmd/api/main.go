@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/OmarElouardi99/BOOKS-API/internal/driver"
 )
@@ -26,12 +27,12 @@ type application struct {
 func main() {
 
 	var cfg config
-	cfg.port = 8081
+	cfg.port, _ = strconv.Atoi(os.Getenv("API_PORT"))
 
 	infoLog := log.New(os.Stdout, "INFO\t", log.Ldate|log.Ltime)
 	errorLog := log.New(os.Stdout, "ERROR\t", log.Ldate|log.Ltime|log.Lshortfile)
 
-	dsn := "root:password@tcp(localhost:3370)/books_api_dev?parseTime=true"
+	dsn := os.Getenv("DSN")
 	db, err := driver.ConnectSQL(dsn)
 	if err != nil {
 		log.Fatal("Cannot connect to the DB")
