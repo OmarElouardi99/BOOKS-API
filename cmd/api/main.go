@@ -37,6 +37,7 @@ func main() {
 	if err != nil {
 		log.Fatal("Cannot connect to the DB")
 	}
+	defer db.SQL.Close()
 	app := &application{
 		config:   cfg,
 		infoLog:  infoLog,
