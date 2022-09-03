@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+
+	"github.com/OmarElouardi99/BOOKS-API/internal/driver"
 )
 
 // config is the type for all api configuration
@@ -17,6 +19,7 @@ type application struct {
 	config   config
 	infoLog  *log.Logger
 	errorLog *log.Logger
+	db       *driver.DB
 }
 
 // main entery point to the api
@@ -28,13 +31,19 @@ func main() {
 	infoLog := log.New(os.Stdout, "INFO\t", log.Ldate|log.Ltime)
 	errorLog := log.New(os.Stdout, "ERROR\t", log.Ldate|log.Ltime|log.Lshortfile)
 
+	dsn := "root:password@tcp(localhost:3370)/books_api_dev?parseTime=true"
+	db, err := driver.ConnectSQL(dsn)
+	if err != nil {
+		log.Fatal("Cannot connect to the DB")
+	}
 	app := &application{
 		config:   cfg,
 		infoLog:  infoLog,
 		errorLog: errorLog,
+		db:       db,
 	}
 
-	err := app.serve()
+	err = app.serve()
 	if err != nil {
 		log.Fatal(err)
 	}
