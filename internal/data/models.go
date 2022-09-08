@@ -2,9 +2,15 @@ package data
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"strings"
 	"time"
 
+	"github.com/dgrijalva/jwt-go"
 	"github.com/jmoiron/sqlx"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -175,10 +181,116 @@ func (t *Token) GetUserByToken(token Token) (*User, error) {
 	defer cancel()
 
 	user := User{}
-	query := `SELECT id, email, first_name, last_name, password, created_at, updated_at from users WHERE is = ?`
+	query := `SELECT id, email, first_name, last_name, password, created_at, updated_at from users WHERE token is = ?`
 	err := db.GetContext(ctx, &user, query, token.UserId)
 	if err != nil {
 		return nil, err
 	}
 	return &user, nil
+}
+
+type JWTClaim struct {
+	Id int `json:"id"`
+	jwt.StandardClaims
+}
+
+func (t *Token) GenerateToken(userId int, ttl time.Duration) (*Token, error) {
+	expirationTime := time.Now().Add(ttl)
+	claims := JWTClaim{
+		Id: userId,
+		StandardClaims: jwt.StandardClaims{
+			ExpiresAt: expirationTime.Unix(),
+		},
+	}
+
+	tokenString, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(os.Getenv("JWT_KEY"))
+	if err != nil {
+		return nil, err
+	}
+	tokenHash := sha256.Sum256([]byte(tokenString))
+	token := Token{}
+	token.Token = tokenString
+	token.TokenHash = tokenHash[:]
+	token.Expiry = expirationTime
+
+	return &token, nil
+
+}
+
+func (t *Token) AuthenticateToken(r *http.Request) (*User, error) {
+
+	authorization := r.Header.Get("Authorization")
+	if authorization == "" {
+		return nil, errors.New("No Authorization found")
+	}
+
+	headerParts := strings.Split(authorization, " ")
+	if len(headerParts) != 2 || headerParts[0] != "Bearer" {
+		return nil, errors.New("No Valid authorisation header received")
+	}
+	parseToken, err := jwt.ParseWithClaims(headerParts[1], JWTClaim{}, func(t *jwt.Token) (interface{}, error) {
+		return []byte(os.Getenv("JWT_KEY")), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	token, err := t.GetByToken(parseToken.Raw)
+	if err != nil {
+		return nil, errors.New("No matching token found")
+	}
+
+	if token.Expiry.Before(time.Now()) {
+		return nil, errors.New("token expired")
+	}
+
+	user, err := t.GetUserByToken(*token)
+	if err != nil {
+		return nil, errors.New("No matching user found")
+	}
+	return user, nil
+}
+
+func (t *Token) AddToken(token Token, user User) {
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeOut)
+	defer cancel()
+
+	stmt := `DELETE FROM tokens WHERE user_id = ?`
+	db.MustExecContext(ctx, stmt, user.Id)
+
+	token.Email = user.Email
+
+	stmt = `INSERT INTO tokens (user_id, email, token, token_hash, expiry, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	db.MustExecContext(ctx, stmt, token.UserId, token.Email, token.Token, token.TokenHash, time.Now(), time.Now())
+
+	fmt.Println("TOKEN Added")
+}
+
+func (t *Token) DeleteByToken(token string) {
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeOut)
+	defer cancel()
+
+	stmt := `DELETE FROM tokens WHERE token = ?`
+	db.MustExecContext(ctx, stmt, token)
+
+	fmt.Println("TOKEN DELETED")
+}
+
+func (t *Token) ValidateToken(tokenRaw string) (bool, error) {
+
+	token, err := t.GetByToken(tokenRaw)
+	if err != nil {
+		return false, errors.New("No matching token found")
+	}
+
+	_, err = t.GetUserByToken(*token)
+	if err != nil {
+		return false, errors.New("No matching user found")
+	}
+
+	if token.Expiry.Before(time.Now()) {
+		return false, errors.New("token expired")
+	}
+
+	return true, nil
 }
